@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v8.1  |  xray-core  |  Multi-Preset  ║
+# ║  GoldIP 3X-UI Manager  v8.2  |  xray-core  |  Multi-Preset  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ── Colors ────────────────────────────────────────────────────────
@@ -101,8 +101,8 @@ REALITY_SNS=('["www.nvidia.com","nvidia.com"]' '["www.cloudflare.com","cloudflar
 GRPC_SVCS=("GrpcService" "api.service.v1" "bing.api.v2" "cdn.asset.v3" "grpc.health.v1")
 GRPC_UA_POOL=("grpc-go/1.63.2" "grpc-java/1.62.2" "grpc-node/1.46.6" "grpc-python/1.62.1" "grpc-dotnet/2.62.0")
 FP_POOL=("chrome" "chrome" "firefox" "edge" "android")
-SO_STD='"mark":0,"tcpFastOpen":true,"tproxy":"off","domainStrategy":"UseIP","tcpKeepAliveInterval":30,"tcpKeepAliveIdle":100,"tcpCongestion":"bbr","tcpWindowClamp":0,"v6only":false,"tcpMptcp":false'
-SO_GRPC='"mark":0,"tcpFastOpen":true,"tproxy":"off","domainStrategy":"UseIP","tcpKeepAliveInterval":15,"tcpKeepAliveIdle":60,"tcpCongestion":"bbr","tcpWindowClamp":0,"v6only":false,"tcpMptcp":false'
+SO_STD=''  # sockopt disabled
+SO_GRPC=''  # sockopt disabled
 SNIFFING='{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
 
 XHTTP_HDR_POOL=(
@@ -187,7 +187,7 @@ create_vless_reality_tcp() {
     UUID=$(mkuuid); SID1=$(openssl rand -hex 4); SID2=$(openssl rand -hex 4); SID3=$(openssl rand -hex 8)
     S=$(mk_vless "$UUID" "xtls-rprx-vision" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"tcp","security":"reality","tcpSettings":{"acceptProxyProtocol":false,"header":{"type":"none"}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}},"sockopt":{${SO_STD}}}
+{"network":"tcp","security":"reality","tcpSettings":{"acceptProxyProtocol":false,"header":{"type":"none"}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}}}
 ENDJSON
 )
     do_insert "VLESS_Reality_TCP" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -200,7 +200,7 @@ create_vless_reality_xhttp() {
     UUID=$(mkuuid); SID1=$(openssl rand -hex 4); SID2=$(openssl rand -hex 4); SID3=$(openssl rand -hex 8)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"reality","xhttpSettings":{"path":"${NEXT_RPATH}","host":"","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}},"sockopt":{${SO_STD}}}
+{"network":"xhttp","security":"reality","xhttpSettings":{"path":"${NEXT_RPATH}","host":"","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}}}
 ENDJSON
 )
     do_insert "VLESS_Reality_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -212,7 +212,7 @@ create_vless_xhttp() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"sockopt":{${SO_STD}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
 ENDJSON
 )
     do_insert "VLESS_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -224,7 +224,7 @@ create_vless_ws_plain() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
 ENDJSON
 )
     do_insert "VLESS_WS" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -238,7 +238,7 @@ create_vless_ws_tls() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
 ENDJSON
 )
     do_insert "VLESS_WS_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -251,10 +251,10 @@ create_vless_grpc_tls() {
     local UUID SVC GRPC_UA S ST
     UUID=$(mkuuid)
     SVC="${GRPC_SVCS[$((RANDOM % ${#GRPC_SVCS[@]}))]}"
-    GRPC_UA="${GRPC_UA_POOL[$((RANDOM % ${#GRPC_UA_POOL[@]}))]}"
+
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"grpc","security":"tls","grpcSettings":{"authority":"${PANEL_DOMAIN}","serviceName":"${SVC}","multiMode":false,"idle_timeout":60,"health_check_timeout":20,"permit_without_stream":true,"initial_windows_size":65536,"user_agent":"${GRPC_UA}"},"tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["h2"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"sockopt":{${SO_GRPC}}}
+{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"${SVC}","multiMode":false},"tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["h2"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false}}
 ENDJSON
 )
     do_insert "VLESS_gRPC_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -268,7 +268,7 @@ create_vless_hu_tls() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"httpupgrade","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"httpupgradeSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_HU_HDR}},"sockopt":{${SO_STD}}}
+{"network":"httpupgrade","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"httpupgradeSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_HU_HDR}}}
 ENDJSON
 )
     do_insert "VLESS_HU_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -280,7 +280,7 @@ create_trojan_ws_plain() {
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
 ENDJSON
 )
     do_insert "Trojan_WS" "trojan" "$NEXT_PORT" "$S" "$ST"
@@ -294,7 +294,7 @@ create_trojan_ws_tls() {
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
 ENDJSON
 )
     do_insert "Trojan_WS_TLS" "trojan" "$NEXT_PORT" "$S" "$ST"
@@ -306,7 +306,7 @@ create_trojan_xhttp() {
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"sockopt":{${SO_STD}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
 ENDJSON
 )
     do_insert "Trojan_XHTTP" "trojan" "$NEXT_PORT" "$S" "$ST"
@@ -318,7 +318,7 @@ create_ss_tcp() {
     PASS=$(openssl rand -base64 24 | tr -d '=+/\n' | head -c 24)
     S=$(mk_ss "$METHOD" "$PASS" "ss_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"tcp","security":"none","tcpSettings":{"acceptProxyProtocol":false,"header":{"type":"none"}},"sockopt":{${SO_STD}}}
+{"network":"tcp","security":"none","tcpSettings":{"acceptProxyProtocol":false,"header":{"type":"none"}}}
 ENDJSON
 )
     MU=$(echo "$METHOD" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
@@ -331,7 +331,7 @@ create_ss_xhttp() {
     PASS=$(openssl rand -base64 24 | tr -d '=+/\n' | head -c 24)
     S=$(mk_ss "aes-256-gcm" "$PASS" "ss_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"sockopt":{${SO_STD}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
 ENDJSON
 )
     do_insert "SS_XHTTP" "shadowsocks" "$NEXT_PORT" "$S" "$ST"
@@ -489,7 +489,7 @@ list_inbounds() {
 show_header() {
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP  3X-UI Manager  v8.1  |  xray-core              ║"
+    echo "  ║  GoldIP  3X-UI Manager  v8.2  |  xray-core              ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     local ST_COLOR ST_TEXT
@@ -656,7 +656,7 @@ do_install() {
     clear
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v8.1                        ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v8.2                        ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
