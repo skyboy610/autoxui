@@ -1,17 +1,15 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v8.0  |  xray-core  |  Multi-Preset  ║
+# ║  GoldIP 3X-UI Manager  v8.1  |  xray-core  |  Multi-Preset  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-# ── Colors ───────────────────────────────────────────────────────
+# ── Colors ────────────────────────────────────────────────────────
 BG_NAVY='\033[48;5;17;97m';    BG_DPURPLE='\033[48;5;54;97m'
 BG_DTEAL='\033[48;5;23;97m';   BG_DMAROON='\033[48;5;52;97m'
 BG_DOLIVE='\033[48;5;58;97m';  BG_DMAGENTA='\033[48;5;90;97m'
 BG_DSLATE='\033[48;5;237;97m'; BG_DINDIGO='\033[48;5;18;97m'
 BG_DFOREST='\033[48;5;22;97m'; BG_DCRIMSON='\033[48;5;88;97m'
-BG_GREEN='\033[42;30m'   # dark text on green (better readability)
-BG_RED='\033[41;97m'     # white on red
-BG_YELLOW='\033[43;30m'  # dark text on yellow
+BG_GREEN='\033[42;30m'; BG_RED='\033[41;97m'; BG_YELLOW='\033[43;30m'
 C1='\033[38;5;39m';  C2='\033[38;5;135m'; C3='\033[38;5;214m'
 C4='\033[38;5;51m';  C5='\033[38;5;200m'; C6='\033[38;5;118m'
 C7='\033[38;5;45m';  C8='\033[38;5;220m'; C9='\033[38;5;165m'
@@ -20,37 +18,69 @@ C10='\033[38;5;87m'; NC='\033[0m'
 print_success() { echo -e "${BG_GREEN}  [OK]  $1  ${NC}"; }
 print_error()   { echo -e "${BG_RED}  [ERR] $1  ${NC}"; }
 print_warn()    { echo -e "${BG_YELLOW}  [>>>] $1  ${NC}"; }
-_LI=0; print_line() {
+_LI=0
+print_line() {
     local a=("$C1" "$C2" "$C3" "$C4" "$C5" "$C6" "$C7" "$C8" "$C9" "$C10")
-    echo -e "${a[$((_LI%10))]}$1${NC}"; ((_LI++)); }
+    echo -e "${a[$((_LI%10))]}$1${NC}"; ((_LI++))
+}
+# [Change 6] Full-line colored menu item (color wraps entire line, not just number)
+mitem() { echo -e "${1}  ${2})  ${3}${NC}"; }
 
 [ "$EUID" -ne 0 ] && { echo -e "${BG_RED}  Run as root!  ${NC}"; exit 1; }
 
-# ── Constants ────────────────────────────────────────────────────
+# ── Constants ─────────────────────────────────────────────────────
 DB_FILE="/etc/x-ui/x-ui.db"
 GOLDIP_CONF="/etc/x-ui/.goldip"
 PANEL_DOMAIN="" PANEL_PORT="" PANEL_PATH="" PANEL_USER="" PANEL_PASS=""
 CERT_FILE="" KEY_FILE="" SSL_OK=false CERT_ENTRY=""
-PRIVATE_KEY="" PUBLIC_KEY="" REALITY_OK=false
+PRIVATE_KEY="" PUBLIC_KEY="" REALITY_OK=false   # [Change 2] PRIVATE_KEY never printed
+FORCE_NO_TLS=false                               # [Change 4] TLS on/off flag
 CREATED=0 SKIPPED=0 PATH_IDX=0
 NEXT_RPATH="" NEXT_XHTTP_HDR="" NEXT_WS_HDR="" NEXT_HU_HDR=""
 NEXT_FP="" NEXT_PORT=0 RT_TARGET="" RT_SNS=""
 
-# ── Config Persistence ───────────────────────────────────────────
+# ── Config Persistence ────────────────────────────────────────────
 save_conf() {
     mkdir -p "$(dirname "$GOLDIP_CONF")"
     printf 'PANEL_DOMAIN=%q\nPANEL_PORT=%q\nPANEL_PATH=%q\nSSL_OK=%s\nCERT_FILE=%q\nKEY_FILE=%q\n' \
         "$PANEL_DOMAIN" "$PANEL_PORT" "$PANEL_PATH" "$SSL_OK" "$CERT_FILE" "$KEY_FILE" > "$GOLDIP_CONF"
 }
+
 load_conf() {
     [ -f "$GOLDIP_CONF" ] && source "$GOLDIP_CONF"
+    # [Change 3] Auto-detect existing valid SSL from DB
+    if [ "$SSL_OK" != "true" ] && [ -f "$DB_FILE" ]; then
+        local _C; _C=$(sqlite3 "$DB_FILE" "SELECT value FROM settings WHERE key='webCertFile';" 2>/dev/null)
+        local _K; _K=$(sqlite3 "$DB_FILE" "SELECT value FROM settings WHERE key='webKeyFile';"  2>/dev/null)
+        if [ -n "$_C" ] && [ -f "$_C" ] && [ -n "$_K" ] && [ -f "$_K" ]; then
+            CERT_FILE="$_C"; KEY_FILE="$_K"; SSL_OK=true
+            save_conf
+        fi
+    fi
     if [ "$SSL_OK" = true ] && [ -n "$CERT_FILE" ] && [ -n "$KEY_FILE" ]; then
         CERT_ENTRY="\"certificates\":[{\"certificateFile\":\"${CERT_FILE}\",\"keyFile\":\"${KEY_FILE}\"}],"
     fi
 }
+
 get_db_val() { sqlite3 "$DB_FILE" "SELECT value FROM settings WHERE key='$1';" 2>/dev/null; }
 
-# ── Pools ────────────────────────────────────────────────────────
+# ── [Change 4] TLS preference ─────────────────────────────────────
+ask_tls_pref() {
+    FORCE_NO_TLS=false
+    local ANS=""
+    while [[ "$ANS" != "y" && "$ANS" != "n" ]]; do
+        echo -e "${BG_DSLATE}  Enable TLS for new inbounds? (y/n):  ${NC}"
+        echo -n -e "${C4}  > ${NC}"; read -r ANS
+    done
+    if [[ "$ANS" = "n" ]]; then
+        FORCE_NO_TLS=true
+        print_warn "TLS disabled — only plain-transport inbounds will be created."
+    else
+        print_success "TLS enabled."
+    fi
+}
+
+# ── Pools ─────────────────────────────────────────────────────────
 ALL_PATHS=(
     "/assets/js/chunk-vendors.min.js"      "/static/css/app.chunk.min.css"
     "/api/v2/telemetry/events"             "/v3/auth/token/refresh"
@@ -71,20 +101,10 @@ REALITY_SNS=('["www.nvidia.com","nvidia.com"]' '["www.cloudflare.com","cloudflar
 GRPC_SVCS=("GrpcService" "api.service.v1" "bing.api.v2" "cdn.asset.v3" "grpc.health.v1")
 GRPC_UA_POOL=("grpc-go/1.63.2" "grpc-java/1.62.2" "grpc-node/1.46.6" "grpc-python/1.62.1" "grpc-dotnet/2.62.0")
 FP_POOL=("chrome" "chrome" "firefox" "edge" "android")
-SS_CIPHERS=("aes-256-gcm" "chacha20-poly1305" "aes-128-gcm")
-
-# sockopt — exact field names from xray-core/infra/conf/transport.go
-# tcpFastOpen:true → reduces connection latency
-# tcpCongestion:bbr → better throughput (requires kernel ≥4.9)
-# tcpKeepAliveInterval/Idle → connection persistence
-# NOTE: xtls-rprx-vision is TCP-only; NOT compatible with gRPC/WS/HU/XHTTP
 SO_STD='"mark":0,"tcpFastOpen":true,"tproxy":"off","domainStrategy":"UseIP","tcpKeepAliveInterval":30,"tcpKeepAliveIdle":100,"tcpCongestion":"bbr","tcpWindowClamp":0,"v6only":false,"tcpMptcp":false'
 SO_GRPC='"mark":0,"tcpFastOpen":true,"tproxy":"off","domainStrategy":"UseIP","tcpKeepAliveInterval":15,"tcpKeepAliveIdle":60,"tcpCongestion":"bbr","tcpWindowClamp":0,"v6only":false,"tcpMptcp":false'
-
 SNIFFING='{"enabled":true,"destOverride":["http","tls","quic","fakedns"],"metadataOnly":false,"routeOnly":false}'
 
-# Browser-family header pools — 5 profiles, ALL values are strings (xray map[string]string)
-# Profile: 0=Chrome/Win  1=Chrome/Mac  2=Firefox/Win  3=Edge/Win  4=Chrome/Android
 XHTTP_HDR_POOL=(
     '{"Accept":"*/*","Accept-Encoding":"gzip, deflate, br, zstd","Accept-Language":"en-US,en;q=0.9","Cache-Control":"no-cache","Pragma":"no-cache","Sec-Ch-Ua":"\"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"","Sec-Ch-Ua-Mobile":"?0","Sec-Ch-Ua-Platform":"\"Windows\"","Sec-Fetch-Dest":"script","Sec-Fetch-Mode":"no-cors","Sec-Fetch-Site":"same-origin","User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}'
     '{"Accept":"*/*","Accept-Encoding":"gzip, deflate, br, zstd","Accept-Language":"en-US,en;q=0.9","Cache-Control":"no-cache","Pragma":"no-cache","Sec-Ch-Ua":"\"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"","Sec-Ch-Ua-Mobile":"?0","Sec-Ch-Ua-Platform":"\"macOS\"","Sec-Fetch-Dest":"script","Sec-Fetch-Mode":"no-cors","Sec-Fetch-Site":"same-origin","User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}'
@@ -107,7 +127,7 @@ HU_HDR_POOL=(
     '{"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8","Accept-Encoding":"gzip, deflate, br, zstd","Accept-Language":"en-US,en;q=0.9","Cache-Control":"max-age=0","Sec-Ch-Ua":"\"Google Chrome\";v=\"125\", \"Chromium\";v=\"125\", \"Not.A/Brand\";v=\"24\"","Sec-Ch-Ua-Mobile":"?1","Sec-Ch-Ua-Platform":"\"Android\"","Sec-Fetch-Dest":"document","Sec-Fetch-Mode":"navigate","Sec-Fetch-Site":"none","Sec-Fetch-User":"?1","Upgrade-Insecure-Requests":"1","User-Agent":"Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.82 Mobile Safari/537.36"}'
 )
 
-# ── Core Engine ──────────────────────────────────────────────────
+# ── Core Engine ───────────────────────────────────────────────────
 advance() {
     local BIDX=$((PATH_IDX % ${#FP_POOL[@]}))
     NEXT_RPATH="${ALL_PATHS[$((PATH_IDX % ${#ALL_PATHS[@]}))]}"
@@ -142,27 +162,24 @@ VALUES (1,0,0,0,'${REMARK}',1,0,'',${PORT},'${PROTO}','${S_ESC}','${ST_ESC}','in
 mkuuid() { cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 16; }
 reset_counters() { CREATED=0; SKIPPED=0; }
 
-mk_vless() {
-    local U="$1" F="$2" E="$3"
-    cat <<J
+mk_vless()  { local U="$1" F="$2" E="$3"; cat <<J
 {"clients":[{"id":"${U}","flow":"${F}","email":"${E}","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":"","subId":"","comment":"","reset":0}],"decryption":"none","fallbacks":[]}
 J
 }
-mk_trojan() {
-    local P="$1" E="$2"
-    cat <<J
+mk_trojan() { local P="$1" E="$2"; cat <<J
 {"clients":[{"password":"${P}","email":"${E}","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":"","subId":"","comment":"","reset":0}],"fallbacks":[]}
 J
 }
-mk_ss() {
-    local M="$1" P="$2" E="$3"
-    cat <<J
+mk_ss() { local M="$1" P="$2" E="$3"; cat <<J
 {"method":"${M}","password":"${P}","network":"tcp,udp","clients":[{"email":"${E}","password":"${P}","method":"${M}","enable":true}]}
 J
 }
 
-# ── Inbound Creators ─────────────────────────────────────────────
-# VLESS Reality TCP — flow:xtls-rprx-vision (TCP-only, no host needed)
+# ── Inbound Creators ──────────────────────────────────────────────
+# [Change 4] Every TLS creator checks FORCE_NO_TLS before proceeding
+_skip_tls() { print_warn "SKIP: $1 (TLS disabled)"; ((SKIPPED++)); }
+_skip_ssl() { print_warn "SKIP: $1 (no SSL cert)"; ((SKIPPED++)); }
+
 create_vless_reality_tcp() {
     [ "$REALITY_OK" = false ] && { print_warn "SKIP: VLESS-Reality-TCP (no keys)"; ((SKIPPED++)); return; }
     advance
@@ -176,7 +193,6 @@ ENDJSON
     do_insert "VLESS_Reality_TCP" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# VLESS Reality XHTTP — host="" (Reality handles SNI)
 create_vless_reality_xhttp() {
     [ "$REALITY_OK" = false ] && { print_warn "SKIP: VLESS-Reality-XHTTP (no keys)"; ((SKIPPED++)); return; }
     advance
@@ -190,7 +206,6 @@ ENDJSON
     do_insert "VLESS_Reality_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# VLESS XHTTP plain — host=PANEL_DOMAIN, xPaddingObfsMode:true
 create_vless_xhttp() {
     advance
     local UUID S ST
@@ -203,9 +218,21 @@ ENDJSON
     do_insert "VLESS_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# VLESS WS TLS — host, heartbeatPeriod, ALPN:http/1.1
+create_vless_ws_plain() {
+    advance
+    local UUID S ST
+    UUID=$(mkuuid)
+    S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
+    ST=$(cat <<ENDJSON
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+ENDJSON
+)
+    do_insert "VLESS_WS" "vless" "$NEXT_PORT" "$S" "$ST"
+}
+
 create_vless_ws_tls() {
-    [ "$SSL_OK" = false ] && { print_warn "SKIP: VLESS-WS-TLS (no SSL)"; ((SKIPPED++)); return; }
+    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-WS-TLS"; return; }
+    [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-WS-TLS"; return; }
     advance
     local UUID S ST
     UUID=$(mkuuid)
@@ -217,10 +244,9 @@ ENDJSON
     do_insert "VLESS_WS_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# VLESS gRPC TLS — authority, permit_without_stream (heartbeat), ALPN:h2
-# NOTE: xtls-rprx-vision NOT applicable to gRPC (TCP-only feature per xray spec)
 create_vless_grpc_tls() {
-    [ "$SSL_OK" = false ] && { print_warn "SKIP: VLESS-gRPC-TLS (no SSL)"; ((SKIPPED++)); return; }
+    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-gRPC-TLS"; return; }
+    [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-gRPC-TLS"; return; }
     advance
     local UUID SVC GRPC_UA S ST
     UUID=$(mkuuid)
@@ -234,9 +260,9 @@ ENDJSON
     do_insert "VLESS_gRPC_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# VLESS HttpUpgrade TLS — host, ALPN:http/1.1
 create_vless_hu_tls() {
-    [ "$SSL_OK" = false ] && { print_warn "SKIP: VLESS-HU-TLS (no SSL)"; ((SKIPPED++)); return; }
+    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-HU-TLS"; return; }
+    [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-HU-TLS"; return; }
     advance
     local UUID S ST
     UUID=$(mkuuid)
@@ -248,9 +274,21 @@ ENDJSON
     do_insert "VLESS_HU_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
-# Trojan WS TLS — host, heartbeat, ALPN:http/1.1
+create_trojan_ws_plain() {
+    advance
+    local PASS S ST
+    PASS=$(openssl rand -hex 16)
+    S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
+    ST=$(cat <<ENDJSON
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30},"sockopt":{${SO_STD}}}
+ENDJSON
+)
+    do_insert "Trojan_WS" "trojan" "$NEXT_PORT" "$S" "$ST"
+}
+
 create_trojan_ws_tls() {
-    [ "$SSL_OK" = false ] && { print_warn "SKIP: Trojan-WS-TLS (no SSL)"; ((SKIPPED++)); return; }
+    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "Trojan-WS-TLS"; return; }
+    [ "$SSL_OK" = false ]      && { _skip_ssl "Trojan-WS-TLS"; return; }
     advance
     local PASS S ST
     PASS=$(openssl rand -hex 16)
@@ -262,7 +300,6 @@ ENDJSON
     do_insert "Trojan_WS_TLS" "trojan" "$NEXT_PORT" "$S" "$ST"
 }
 
-# Trojan XHTTP — host, xPaddingObfsMode
 create_trojan_xhttp() {
     advance
     local PASS S ST
@@ -275,10 +312,8 @@ ENDJSON
     do_insert "Trojan_XHTTP" "trojan" "$NEXT_PORT" "$S" "$ST"
 }
 
-# Shadowsocks TCP — host N/A (raw TCP), sockopt
 create_ss_tcp() {
-    local METHOD="${1:-aes-256-gcm}"
-    advance
+    local METHOD="${1:-aes-256-gcm}"; advance
     local PASS S ST MU
     PASS=$(openssl rand -base64 24 | tr -d '=+/\n' | head -c 24)
     S=$(mk_ss "$METHOD" "$PASS" "ss_${NEXT_PORT}")
@@ -290,7 +325,6 @@ ENDJSON
     do_insert "SS_${MU}" "shadowsocks" "$NEXT_PORT" "$S" "$ST"
 }
 
-# Shadowsocks XHTTP — host=PANEL_DOMAIN, path obfuscation
 create_ss_xhttp() {
     advance
     local PASS S ST
@@ -303,65 +337,36 @@ ENDJSON
     do_insert "SS_XHTTP" "shadowsocks" "$NEXT_PORT" "$S" "$ST"
 }
 
-# ── Presets ──────────────────────────────────────────────────────
-# 3-config: CDN Primary + Secondary + Direct fallback
-run_preset_3() {
+# ── Presets ────────────────────────────────────────────────────────
+run_preset_3()  {
     reset_counters; PATH_IDX=0
-    print_line "  ▶ 3-Config: WS-TLS + gRPC-TLS + Reality-TCP"
-    create_vless_ws_tls
-    create_vless_grpc_tls
-    create_vless_reality_tcp
+    create_vless_ws_tls; create_vless_grpc_tls; create_vless_reality_tcp
 }
-# 5-config: Full stack (WS+gRPC+XHTTP+Trojan+SS)
-run_preset_5() {
+run_preset_5()  {
     reset_counters; PATH_IDX=0
-    print_line "  ▶ 5-Config: WS-TLS + gRPC-TLS + XHTTP + Trojan-WS + SS-TCP"
-    create_vless_ws_tls
-    create_vless_grpc_tls
-    create_vless_xhttp
-    create_trojan_ws_tls
-    create_ss_tcp "aes-256-gcm"
+    create_vless_ws_tls; create_vless_grpc_tls; create_vless_xhttp
+    create_trojan_ws_tls; create_ss_tcp "aes-256-gcm"
 }
-# 6-config: Load balance — 3×XHTTP + WS + gRPC + Trojan
 run_preset_6_lb() {
     reset_counters; PATH_IDX=0
-    print_line "  ▶ 6-Config LB: XHTTP×3 (Chrome/Firefox/Edge) + WS + gRPC + Trojan"
-    create_vless_xhttp   # Chrome/Win profile (idx 0)
-    create_vless_xhttp   # Chrome/Mac profile (idx 1)
-    create_vless_xhttp   # Firefox/Win profile (idx 2)
-    create_vless_ws_tls
-    create_vless_grpc_tls
-    create_trojan_ws_tls
+    create_vless_xhttp; create_vless_xhttp; create_vless_xhttp
+    create_vless_ws_tls; create_vless_grpc_tls; create_trojan_ws_tls
 }
-# 7-config: Anti-DPI + CDN coverage
-run_preset_7() {
+run_preset_7()  {
     reset_counters; PATH_IDX=0
-    print_line "  ▶ 7-Config: Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
     create_vless_reality_tcp
-    create_vless_xhttp   # Chrome/Win
-    create_vless_xhttp   # Chrome/Mac
-    create_vless_xhttp   # Firefox/Win
-    create_vless_grpc_tls
-    create_trojan_ws_tls
-    create_ss_tcp "chacha20-poly1305"
+    create_vless_xhttp; create_vless_xhttp; create_vless_xhttp
+    create_vless_grpc_tls; create_trojan_ws_tls; create_ss_tcp "chacha20-poly1305"
 }
-# 10-config: Full coverage (all transport types)
 run_preset_10() {
     reset_counters; PATH_IDX=0
-    print_line "  ▶ 10-Config: Full Coverage (Reality+XHTTP×3+WS+gRPC+HU+Trojan+SS)"
-    create_vless_reality_tcp
-    create_vless_reality_xhttp
-    create_vless_xhttp        # Chrome/Win
-    create_vless_xhttp        # Chrome/Mac
-    create_vless_xhttp        # Firefox/Win
-    create_vless_ws_tls
-    create_vless_grpc_tls
-    create_vless_hu_tls
-    create_trojan_ws_tls
-    create_ss_tcp "chacha20-poly1305"
+    create_vless_reality_tcp; create_vless_reality_xhttp
+    create_vless_xhttp; create_vless_xhttp; create_vless_xhttp
+    create_vless_ws_tls; create_vless_grpc_tls; create_vless_hu_tls
+    create_trojan_ws_tls; create_ss_tcp "chacha20-poly1305"
 }
 
-# ── Reality Key Discovery ─────────────────────────────────────────
+# ── Reality Keys ──────────────────────────────────────────────────
 find_and_gen_keys() {
     XRAY_BIN=""
     for p in "/usr/local/x-ui/bin/xray-linux-amd64" "/usr/local/x-ui/bin/xray-linux-arm64" \
@@ -376,7 +381,9 @@ find_and_gen_keys() {
         PRIVATE_KEY=$(echo "$KEY_OUT" | grep -i "private" | awk '{print $NF}' | tr -d '[:space:]')
         PUBLIC_KEY=$(echo  "$KEY_OUT" | grep -i "public"  | awk '{print $NF}' | tr -d '[:space:]')
         if [[ ${#PRIVATE_KEY} -ge 40 && ${#PUBLIC_KEY} -ge 40 ]]; then
-            REALITY_OK=true; print_success "Reality keys generated."
+            REALITY_OK=true
+            print_success "Reality keys generated."
+            # [Change 2] PUBLIC_KEY shown, PRIVATE_KEY NEVER printed
         else
             print_error "Reality key gen failed."
         fi
@@ -385,21 +392,29 @@ find_and_gen_keys() {
     fi
 }
 
-# ── Get SSL ───────────────────────────────────────────────────────
+# ── SSL ────────────────────────────────────────────────────────────
 get_ssl() {
     [ -z "$PANEL_DOMAIN" ] && { print_error "No domain set."; return 1; }
+    # [Change 3] Skip if valid cert already exists for this domain
+    local EC="/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem"
+    local EK="/etc/letsencrypt/live/${PANEL_DOMAIN}/privkey.pem"
+    if [ -f "$EC" ] && [ -f "$EK" ]; then
+        CERT_FILE="$EC"; KEY_FILE="$EK"; SSL_OK=true
+        CERT_ENTRY="\"certificates\":[{\"certificateFile\":\"${CERT_FILE}\",\"keyFile\":\"${KEY_FILE}\"}],"
+        sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO settings (key,value) VALUES ('webCertFile','${CERT_FILE}');" 2>/dev/null
+        sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO settings (key,value) VALUES ('webKeyFile','${KEY_FILE}');" 2>/dev/null
+        save_conf; print_success "Existing SSL cert found and applied for ${PANEL_DOMAIN}."; return 0
+    fi
     print_warn "Getting SSL for ${PANEL_DOMAIN}..."
     systemctl stop nginx 2>/dev/null; systemctl stop apache2 2>/dev/null
     certbot certonly --standalone --non-interactive --agree-tos \
         --register-unsafely-without-email -d "${PANEL_DOMAIN}" 2>&1 \
         | while IFS= read -r l; do echo -e "${C4}  [certbot] ${l}${NC}"; done
-    CERT_FILE="/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem"
-    KEY_FILE="/etc/letsencrypt/live/${PANEL_DOMAIN}/privkey.pem"
-    if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ]; then
+    if [ -f "$EC" ] && [ -f "$EK" ]; then
+        CERT_FILE="$EC"; KEY_FILE="$EK"; SSL_OK=true
+        CERT_ENTRY="\"certificates\":[{\"certificateFile\":\"${CERT_FILE}\",\"keyFile\":\"${KEY_FILE}\"}],"
         sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO settings (key,value) VALUES ('webCertFile','${CERT_FILE}');" 2>/dev/null
         sqlite3 "$DB_FILE" "INSERT OR REPLACE INTO settings (key,value) VALUES ('webKeyFile','${KEY_FILE}');"  2>/dev/null
-        SSL_OK=true
-        CERT_ENTRY="\"certificates\":[{\"certificateFile\":\"${CERT_FILE}\",\"keyFile\":\"${KEY_FILE}\"}],"
         save_conf; print_success "SSL obtained."
     else
         SSL_OK=false; CERT_ENTRY=""
@@ -407,15 +422,11 @@ get_ssl() {
     fi
 }
 
-# ── Management Functions ──────────────────────────────────────────
+# ── Management ────────────────────────────────────────────────────
 restart_xui() {
-    x-ui restart 2>/dev/null || systemctl restart x-ui
-    sleep 3
-    if systemctl is-active --quiet x-ui; then
-        print_success "x-ui restarted."
-    else
-        print_error "x-ui failed. Run: journalctl -u x-ui -n 50"
-    fi
+    x-ui restart 2>/dev/null || systemctl restart x-ui; sleep 3
+    systemctl is-active --quiet x-ui && print_success "x-ui restarted." \
+        || print_error "x-ui failed. Check: journalctl -u x-ui -n 50"
 }
 
 change_credential() {
@@ -423,34 +434,31 @@ change_credential() {
     echo -e "${BG_DINDIGO}  New ${FIELD}:  ${NC}"
     echo -n -e "${C4}  > ${NC}"; read -r NEW_VAL
     [ -z "$NEW_VAL" ] && { print_warn "Cancelled."; return; }
-    /usr/local/x-ui/x-ui setting "-${FIELD}" "$NEW_VAL"
-    restart_xui; sleep 1
+    /usr/local/x-ui/x-ui setting "-${FIELD}" "$NEW_VAL"; restart_xui
 }
 
 change_port() {
     echo -e "${BG_DINDIGO}  New Panel Port [current: ${PANEL_PORT}]:  ${NC}"
-    echo -n -e "${C4}  > ${NC}"; read -r NEW_PORT
-    [ -z "$NEW_PORT" ] && return
-    /usr/local/x-ui/x-ui setting -port "$NEW_PORT"
-    PANEL_PORT="$NEW_PORT"; save_conf; restart_xui
+    echo -n -e "${C4}  > ${NC}"; read -r NP; [ -z "$NP" ] && return
+    /usr/local/x-ui/x-ui setting -port "$NP"
+    PANEL_PORT="$NP"; save_conf; restart_xui
 }
 
+# [Change 7] path prompts use "new-path" as example
 change_path() {
-    echo -e "${BG_DINDIGO}  New Web Path [current: ${PANEL_PATH}]:  ${NC}"
-    echo -n -e "${C4}  > ${NC}"; read -r NEW_PATH
-    [ -z "$NEW_PATH" ] && return
-    [[ ! "$NEW_PATH" =~ ^/ ]] && NEW_PATH="/$NEW_PATH"
-    [[ ! "$NEW_PATH" =~ /$ ]] && NEW_PATH="$NEW_PATH/"
-    /usr/local/x-ui/x-ui setting -webBasePath "$NEW_PATH"
-    PANEL_PATH="$NEW_PATH"; save_conf; restart_xui
+    local CUR; CUR=$(get_db_val "webBasePath" 2>/dev/null || echo "$PANEL_PATH")
+    echo -e "${BG_DINDIGO}  New Web Path [current: ${CUR}]  (e.g. /new-path/):  ${NC}"
+    echo -n -e "${C4}  > ${NC}"; read -r NP; [ -z "$NP" ] && return
+    [[ ! "$NP" =~ ^/ ]] && NP="/$NP"
+    [[ ! "$NP" =~ /$ ]] && NP="$NP/"
+    /usr/local/x-ui/x-ui setting -webBasePath "$NP"
+    PANEL_PATH="$NP"; save_conf; restart_xui
 }
 
 change_domain_ssl() {
     echo -e "${BG_DINDIGO}  New Domain (SSL will renew):  ${NC}"
-    echo -n -e "${C4}  > ${NC}"; read -r NEW_DOM
-    [ -z "$NEW_DOM" ] && return
-    PANEL_DOMAIN="$NEW_DOM"; get_ssl; save_conf
-    restart_xui
+    echo -n -e "${C4}  > ${NC}"; read -r ND; [ -z "$ND" ] && return
+    PANEL_DOMAIN="$ND"; get_ssl; save_conf; restart_xui
 }
 
 clean_inbounds() {
@@ -462,70 +470,127 @@ clean_inbounds() {
     print_success "All inbounds deleted."; restart_xui
 }
 
+# ── [Change 1] List inbounds with BG_NAVY boxes (same as domain prompt) ──────
 list_inbounds() {
-    echo -e "${C4}"
-    printf "  %-5s %-30s %-8s %-12s %-10s\n" "ID" "Remark" "Port" "Protocol" "Tag"
-    echo "  ──────────────────────────────────────────────────────────"
-    sqlite3 "$DB_FILE" "SELECT id,remark,port,protocol,tag FROM inbounds WHERE user_id=1;" 2>/dev/null \
+    echo ""
+    echo -e "${BG_NAVY}  $(printf '%-4s  %-28s  %-6s  %-13s  %-18s' 'ID' 'Remark' 'Port' 'Protocol' 'Tag')  ${NC}"
+    local COUNT=0
+    sqlite3 "$DB_FILE" "SELECT id,remark,port,protocol,tag FROM inbounds WHERE user_id=1 ORDER BY id;" 2>/dev/null \
         | while IFS='|' read -r id remark port proto tag; do
-            printf "  %-5s %-30s %-8s %-12s %-10s\n" "$id" "$remark" "$port" "$proto" "$tag"
+            echo -e "${BG_NAVY}  $(printf '%-4s  %-28s  %-6s  %-13s  %-18s' "$id" "$remark" "$port" "$proto" "$tag")  ${NC}"
+            ((COUNT++))
         done
-    echo -e "${NC}"
+    echo ""
+    local TOTAL; TOTAL=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM inbounds WHERE user_id=1;" 2>/dev/null || echo 0)
+    echo -e "${C4}  Total inbounds: ${TOTAL}${NC}"; echo ""
 }
 
-# ── Header ───────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────
 show_header() {
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP  3X-UI Manager  v8.0  |  xray-core              ║"
+    echo "  ║  GoldIP  3X-UI Manager  v8.1  |  xray-core              ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-    local ST_COLOR; local ST_TEXT
-    if systemctl is-active --quiet x-ui 2>/dev/null; then
-        ST_COLOR="${BG_GREEN}"; ST_TEXT=" RUNNING "
-    else
-        ST_COLOR="${BG_RED}"; ST_TEXT=" STOPPED "
-    fi
+    local ST_COLOR ST_TEXT
+    systemctl is-active --quiet x-ui 2>/dev/null \
+        && ST_COLOR="${BG_GREEN}" ST_TEXT=" RUNNING " \
+        || ST_COLOR="${BG_RED}"   ST_TEXT=" STOPPED "
     echo -e "  ${C6}● xray:${NC} ${ST_COLOR}${ST_TEXT}${NC}  ${C4}${PANEL_DOMAIN}:${PANEL_PORT}${PANEL_PATH}${NC}"
-    [ "$SSL_OK" = true ] && echo -e "  ${C6}● SSL:${NC}  ${BG_GREEN}  VALID  ${NC}" \
-                         || echo -e "  ${C6}● SSL:${NC}  ${BG_RED}  NONE  ${NC}"
-    [ "$REALITY_OK" = true ] && echo -e "  ${C6}● Reality PubKey:${NC} ${C4}${PUBLIC_KEY:0:20}...${NC}"
+    [ "$SSL_OK" = true ] \
+        && echo -e "  ${C6}● SSL:${NC}  ${BG_GREEN}  VALID  ${NC}" \
+        || echo -e "  ${C6}● SSL:${NC}  ${BG_RED}  NONE   ${NC}"
+    # [Change 2] Show only PUBLIC_KEY — PRIVATE_KEY is never printed
+    [ "$REALITY_OK" = true ] && echo -e "  ${C6}● Reality PubKey:${NC} ${C4}${PUBLIC_KEY:0:24}...${NC}"
     echo ""
 }
 
 after_inbounds() {
-    echo ""
-    restart_xui
-    echo -e "${C1}  Inbounds created: ${CREATED}${NC}  ${C3}Skipped: ${SKIPPED}${NC}"
+    echo ""; restart_xui
+    echo -e "${C1}  Created: ${CREATED}${NC}   ${C3}Skipped: ${SKIPPED}${NC}"
     [ "$SKIPPED" -gt 0 ] && [ "$SSL_OK" = false ] && \
-        print_warn "TLS inbounds skipped — run 'Get SSL' from Settings menu."
+        print_warn "TLS inbounds skipped — use 'Get SSL' in Settings."
     echo ""; echo -e "${C7}  Press Enter...${NC}"; read -r
 }
 
-# ── Menu: Inbounds ───────────────────────────────────────────────
+# ── [Change 5] Individual Inbound Menu ────────────────────────────
+menu_individual_inbound() {
+    while true; do
+        clear; show_header
+        print_line "  ══ INDIVIDUAL INBOUND ══"
+        echo ""
+        [ "$SSL_OK"     != true ] && echo -e "  ${BG_YELLOW}  ⚠  No SSL — TLS inbounds will be skipped  ${NC}"
+        [ "$REALITY_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No Reality keys — Reality inbounds skipped  ${NC}"
+        echo ""
+        # [Change 1+6] BG_NAVY boxes with full-line color for each item
+        echo -e "${BG_NAVY}  ── VLESS ────────────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}   1   VLESS-Reality-TCP       xtls-rprx-vision, no TLS      ${NC}"
+        echo -e "${BG_NAVY}   2   VLESS-Reality-XHTTP     Reality security, XHTTP        ${NC}"
+        echo -e "${BG_NAVY}   3   VLESS-XHTTP             plain, host+padding obfs       ${NC}"
+        echo -e "${BG_NAVY}   4   VLESS-WS                plain WebSocket                ${NC}"
+        echo -e "${BG_NAVY}   5   VLESS-WS-TLS            WebSocket over TLS  [SSL req]  ${NC}"
+        echo -e "${BG_NAVY}   6   VLESS-gRPC-TLS          gRPC + heartbeat    [SSL req]  ${NC}"
+        echo -e "${BG_NAVY}   7   VLESS-HttpUpgrade-TLS   HU over TLS         [SSL req]  ${NC}"
+        echo -e "${BG_NAVY}  ── TROJAN ────────────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}   8   Trojan-WS               plain WebSocket                ${NC}"
+        echo -e "${BG_NAVY}   9   Trojan-WS-TLS           WebSocket over TLS  [SSL req]  ${NC}"
+        echo -e "${BG_NAVY}  10   Trojan-XHTTP            plain, padding obfs            ${NC}"
+        echo -e "${BG_NAVY}  ── SHADOWSOCKS ───────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}  11   SS-TCP-AES256-GCM       raw TCP                        ${NC}"
+        echo -e "${BG_NAVY}  12   SS-TCP-ChaCha20         raw TCP                        ${NC}"
+        echo -e "${BG_NAVY}  13   SS-XHTTP                XHTTP + host + padding         ${NC}"
+        echo -e "${BG_NAVY}   0   Back                                                    ${NC}"
+        echo ""
+        echo -n -e "${C3}  choice > ${NC}"; read -r CH
+        [ "$CH" = "0" ] && return
+        clear; show_header; ask_tls_pref; reset_counters
+        case $CH in
+            1)  create_vless_reality_tcp ;;
+            2)  create_vless_reality_xhttp ;;
+            3)  create_vless_xhttp ;;
+            4)  create_vless_ws_plain ;;
+            5)  create_vless_ws_tls ;;
+            6)  create_vless_grpc_tls ;;
+            7)  create_vless_hu_tls ;;
+            8)  create_trojan_ws_plain ;;
+            9)  create_trojan_ws_tls ;;
+            10) create_trojan_xhttp ;;
+            11) create_ss_tcp "aes-256-gcm" ;;
+            12) create_ss_tcp "chacha20-poly1305" ;;
+            13) create_ss_xhttp ;;
+            *)  print_warn "Invalid choice."; sleep 1; continue ;;
+        esac
+        after_inbounds
+    done
+}
+
+# ── Menu: Inbounds ────────────────────────────────────────────────
 menu_inbounds() {
     while true; do
         clear; show_header
-        print_line "  ══ CREATE INBOUNDS ══"
-        [ "$SSL_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No SSL — TLS inbounds will be skipped  ${NC}"
-        [ "$REALITY_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No Reality keys — Reality inbounds skipped  ${NC}"
+        print_line "  ══ INBOUND MANAGER ══"
+        [ "$SSL_OK"     != true ] && echo -e "  ${BG_YELLOW}  ⚠  No SSL — TLS inbounds skipped  ${NC}"
+        [ "$REALITY_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No Reality keys — Reality skipped  ${NC}"
         echo ""
-        echo -e "${C1}  1)${NC} 3-Config   │ WS-TLS + gRPC-TLS + Reality-TCP"
-        echo -e "${C2}  2)${NC} 5-Config   │ WS-TLS + gRPC-TLS + XHTTP + Trojan-WS + SS-TCP"
-        echo -e "${C3}  3)${NC} 6-Config   │ Load Balance: XHTTP×3 + WS + gRPC + Trojan [for relay]"
-        echo -e "${C4}  4)${NC} 7-Config   │ Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
-        echo -e "${C5}  5)${NC} 10-Config  │ Full Coverage: all transport types"
-        echo -e "${C6}  L)${NC} List current inbounds"
-        echo -e "${C8}  D)${NC} Delete ALL inbounds"
-        echo -e "${C9}  0)${NC} Back"
+        # [Change 6] Full-line color using mitem helper
+        mitem "$C1" "1" "3-Config    │ WS-TLS + gRPC-TLS + Reality-TCP"
+        mitem "$C2" "2" "5-Config    │ WS-TLS + gRPC-TLS + XHTTP + Trojan-WS + SS-TCP"
+        mitem "$C3" "3" "6-Config LB │ XHTTP×3 (multi-browser) + WS + gRPC + Trojan"
+        mitem "$C4" "4" "7-Config    │ Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
+        mitem "$C5" "5" "10-Config   │ Full Coverage — all transport types"
+        mitem "$C6" "6" "Individual  │ Pick any single inbound from full list"
+        mitem "$C7" "L" "List        │ View current inbounds in panel"
+        mitem "$C8" "D" "Delete ALL  │ Remove all inbounds from DB"
+        mitem "$C9" "0" "Back"
         echo ""
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case "${CH^^}" in
-            1) clear; show_header; run_preset_3;    after_inbounds ;;
-            2) clear; show_header; run_preset_5;    after_inbounds ;;
-            3) clear; show_header; run_preset_6_lb; after_inbounds ;;
-            4) clear; show_header; run_preset_7;    after_inbounds ;;
-            5) clear; show_header; run_preset_10;   after_inbounds ;;
+            1) clear; show_header; ask_tls_pref; run_preset_3;    after_inbounds ;;
+            2) clear; show_header; ask_tls_pref; run_preset_5;    after_inbounds ;;
+            3) clear; show_header; ask_tls_pref; run_preset_6_lb; after_inbounds ;;
+            4) clear; show_header; ask_tls_pref; run_preset_7;    after_inbounds ;;
+            5) clear; show_header; ask_tls_pref; run_preset_10;   after_inbounds ;;
+            6) menu_individual_inbound ;;
             L) clear; list_inbounds; echo -e "${C7}  Press Enter...${NC}"; read -r ;;
             D) clean_inbounds; echo -e "${C7}  Press Enter...${NC}"; read -r ;;
             0) return ;;
@@ -533,21 +598,22 @@ menu_inbounds() {
     done
 }
 
-# ── Menu: Settings ───────────────────────────────────────────────
+# ── Menu: Settings ────────────────────────────────────────────────
 menu_settings() {
     while true; do
-        clear; show_header
-        print_line "  ══ PANEL SETTINGS ══"
-        local CUR_PORT; CUR_PORT=$(get_db_val "webPort" || echo "$PANEL_PORT")
-        local CUR_PATH; CUR_PATH=$(get_db_val "webBasePath" || echo "$PANEL_PATH")
+        clear; show_header; print_line "  ══ PANEL SETTINGS ══"
+        local CUR_PORT; CUR_PORT=$(get_db_val "webPort" 2>/dev/null || echo "$PANEL_PORT")
+        local CUR_PATH; CUR_PATH=$(get_db_val "webBasePath" 2>/dev/null || echo "$PANEL_PATH")
         echo ""
-        echo -e "${C1}  1)${NC} Change Username"
-        echo -e "${C2}  2)${NC} Change Password"
-        echo -e "${C3}  3)${NC} Change Port      [${CUR_PORT}]"
-        echo -e "${C4}  4)${NC} Change Path      [${CUR_PATH}]"
-        echo -e "${C5}  5)${NC} Change Domain + Renew SSL  [${PANEL_DOMAIN}]"
-        echo -e "${C6}  6)${NC} Get / Renew SSL (same domain)"
-        echo -e "${C9}  0)${NC} Back"
+        # [Change 6] Full-line color
+        mitem "$C1" "1" "Change Username"
+        mitem "$C2" "2" "Change Password"
+        mitem "$C3" "3" "Change Port       [${CUR_PORT}]"
+        # [Change 7] "new-path" in label/example
+        mitem "$C4" "4" "Change Path       [${CUR_PATH}]  (e.g. /new-path/)"
+        mitem "$C5" "5" "Change Domain + Renew SSL  [${PANEL_DOMAIN}]"
+        mitem "$C6" "6" "Get / Renew SSL (same domain)"
+        mitem "$C9" "0" "Back"
         echo ""
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case $CH in
@@ -562,27 +628,24 @@ menu_settings() {
     done
 }
 
-# ── Menu: Service ────────────────────────────────────────────────
+# ── Menu: Service ─────────────────────────────────────────────────
 menu_service() {
     while true; do
-        clear; show_header
-        print_line "  ══ SERVICE CONTROL ══"; echo ""
-        echo -e "${C1}  1)${NC} Start x-ui"
-        echo -e "${C2}  2)${NC} Stop x-ui"
-        echo -e "${C3}  3)${NC} Restart x-ui"
-        echo -e "${C4}  4)${NC} Status (live)"
-        echo -e "${C5}  5)${NC} xray Logs (last 80 lines)"
-        echo -e "${C9}  0)${NC} Back"
+        clear; show_header; print_line "  ══ SERVICE CONTROL ══"; echo ""
+        mitem "$C1" "1" "Start x-ui"
+        mitem "$C2" "2" "Stop x-ui"
+        mitem "$C3" "3" "Restart x-ui"
+        mitem "$C4" "4" "Status (live)"
+        mitem "$C5" "5" "xray Logs (last 80 lines)"
+        mitem "$C9" "0" "Back"
         echo ""
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case $CH in
-            1) systemctl start x-ui;   print_success "Started";  sleep 2 ;;
-            2) systemctl stop x-ui;    print_success "Stopped";  sleep 2 ;;
+            1) systemctl start x-ui; print_success "Started"; sleep 2 ;;
+            2) systemctl stop x-ui;  print_success "Stopped"; sleep 2 ;;
             3) restart_xui; sleep 2 ;;
-            4) clear; systemctl status x-ui --no-pager -l
-               echo ""; echo -e "${C4}  Press Enter...${NC}"; read -r ;;
-            5) clear; journalctl -u x-ui -n 80 --no-pager
-               echo ""; echo -e "${C4}  Press Enter...${NC}"; read -r ;;
+            4) clear; systemctl status x-ui --no-pager -l; echo ""; echo -e "${C4}  Press Enter...${NC}"; read -r ;;
+            5) clear; journalctl -u x-ui -n 80 --no-pager;  echo ""; echo -e "${C4}  Press Enter...${NC}"; read -r ;;
             0) return ;;
         esac
     done
@@ -593,7 +656,7 @@ do_install() {
     clear
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v8.0                        ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v8.1                        ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
@@ -604,7 +667,8 @@ do_install() {
     done
     PANEL_PATH=""
     while [ -z "$PANEL_PATH" ]; do
-        echo -e "${BG_DPURPLE}  [2/5]  Web Path (e.g. /secret/):  ${NC}"
+        # [Change 7] example uses "new-path"
+        echo -e "${BG_DPURPLE}  [2/5]  Web Path (e.g. /new-path/):  ${NC}"
         echo -n -e "${C2}  path > ${NC}"; read -r PANEL_PATH
     done
     [[ ! "$PANEL_PATH" =~ ^/ ]] && PANEL_PATH="/$PANEL_PATH"
@@ -630,7 +694,6 @@ do_install() {
     apt-get install -y -q curl sqlite3 openssl certbot 2>/dev/null
     print_success "Dependencies installed."
 
-    # Firewall OFF per user config
     systemctl disable ufw 2>/dev/null; systemctl stop ufw 2>/dev/null
     print_warn "Firewall disabled."
 
@@ -653,6 +716,7 @@ do_install() {
     /usr/local/x-ui/x-ui setting -webBasePath "${PANEL_PATH}"
     sleep 1; print_success "Credentials applied."
 
+    # [Change 3] get_ssl auto-reuses existing cert if available
     get_ssl
 
     print_warn "Cleaning existing inbounds..."
@@ -660,16 +724,19 @@ do_install() {
     sqlite3 "$DB_FILE" "DELETE FROM inbounds WHERE user_id=1;" 2>/dev/null
     print_success "DB cleaned."
 
-    save_conf
-    find_and_gen_keys
+    save_conf; find_and_gen_keys
 
     echo ""; print_line "  ══ SELECT INBOUND PRESET ══"; echo ""
-    echo -e "${C1}  1)${NC} 3-Config   │ WS-TLS + gRPC-TLS + Reality-TCP"
-    echo -e "${C2}  2)${NC} 5-Config   │ Full Stack (WS+gRPC+XHTTP+Trojan+SS)"
-    echo -e "${C3}  3)${NC} 6-Config   │ Load Balance: XHTTP×3 + WS + gRPC + Trojan"
-    echo -e "${C4}  4)${NC} 7-Config   │ Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
-    echo -e "${C5}  5)${NC} 10-Config  │ Full Coverage (all types)"
-    echo -e "${C9}  0)${NC} Skip (add inbounds later from menu)"
+    # [Change 6] Full-line color for preset list
+    mitem "$C1" "1" "3-Config    │ WS-TLS + gRPC-TLS + Reality-TCP"
+    mitem "$C2" "2" "5-Config    │ Full Stack (WS+gRPC+XHTTP+Trojan+SS)"
+    mitem "$C3" "3" "6-Config LB │ Load Balance: XHTTP×3 + WS + gRPC + Trojan"
+    mitem "$C4" "4" "7-Config    │ Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
+    mitem "$C5" "5" "10-Config   │ Full Coverage (all types)"
+    mitem "$C9" "0" "Skip (add inbounds later from menu)"
+    echo ""
+    # [Change 4] Ask TLS before preset
+    ask_tls_pref
     echo ""
     PRESET=""
     while [[ ! "$PRESET" =~ ^[0-5]$ ]]; do
@@ -678,47 +745,42 @@ do_install() {
     done
 
     case $PRESET in
-        1) run_preset_3 ;;
-        2) run_preset_5 ;;
-        3) run_preset_6_lb ;;
-        4) run_preset_7 ;;
+        1) run_preset_3 ;; 2) run_preset_5 ;;
+        3) run_preset_6_lb ;; 4) run_preset_7 ;;
         5) run_preset_10 ;;
         0) print_warn "Skipped. Create inbounds from main menu." ;;
     esac
 
     restart_xui
 
-    echo ""
-    print_line "  ══ INSTALL COMPLETE ══"; echo ""
+    echo ""; print_line "  ══ INSTALL COMPLETE ══"; echo ""
     if [ "$SSL_OK" = true ]; then
         echo -e "${C4}  Panel: ${C1}https://${PANEL_DOMAIN}:${PANEL_PORT}${PANEL_PATH}${NC}"
     else
         echo -e "${C3}  Panel: ${C8}http://${PANEL_DOMAIN}:${PANEL_PORT}${PANEL_PATH}${NC}"
     fi
-    echo -e "${C2}  User: ${C7}${PANEL_USER}${NC}  ${C5}Pass: ${C9}${PANEL_PASS}${NC}"
-    echo -e "${C1}  Inbounds: ${CREATED}  Skipped: ${SKIPPED}${NC}"
-    [ "$REALITY_OK" = true ] && echo -e "${C4}  Reality PubKey: ${NC}${PUBLIC_KEY}"
-    echo ""; print_success "Done. Loading management menu..."
-    sleep 3
+    echo -e "${C2}  User: ${C7}${PANEL_USER}${NC}   ${C5}Pass: ${C9}${PANEL_PASS}${NC}"
+    echo -e "${C1}  Inbounds: ${CREATED}   Skipped: ${SKIPPED}${NC}"
+    # [Change 2] Only PUBLIC_KEY shown; PRIVATE_KEY never printed
+    [ "$REALITY_OK" = true ] && echo -e "${C4}  Reality Public Key: ${C1}${PUBLIC_KEY}${NC}"
+    echo ""; print_success "Done. Loading management menu..."; sleep 3
 }
 
-# ── Main Menu ────────────────────────────────────────────────────
+# ── Main Menu ─────────────────────────────────────────────────────
 main_menu() {
     while true; do
-        clear; show_header
-        print_line "  ══ MAIN MENU ══"; echo ""
-        echo -e "${C1}  1)${NC} Create / Manage Inbounds"
-        echo -e "${C2}  2)${NC} Panel Settings  (user/pass/port/path/domain/SSL)"
-        echo -e "${C3}  3)${NC} Service Control  (start/stop/restart/logs)"
-        echo -e "${C4}  4)${NC} Reinstall / Re-setup"
-        echo -e "${C9}  0)${NC} Exit"
+        clear; show_header; print_line "  ══ MAIN MENU ══"; echo ""
+        # [Change 6] Full-line color
+        mitem "$C1" "1" "Create / Manage Inbounds"
+        mitem "$C2" "2" "Panel Settings  (user/pass/port/path/domain/SSL)"
+        mitem "$C3" "3" "Service Control  (start/stop/restart/logs)"
+        mitem "$C4" "4" "Reinstall / Re-setup"
+        mitem "$C9" "0" "Exit"
         echo ""
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case $CH in
-            1) menu_inbounds ;;
-            2) menu_settings ;;
-            3) menu_service ;;
-            4) do_install ;;
+            1) menu_inbounds ;; 2) menu_settings ;;
+            3) menu_service ;; 4) do_install ;;
             0) exit 0 ;;
         esac
     done
