@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v8.4  |  xray-core  |  Multi-Preset  ║
+# ║  GoldIP 3X-UI Manager  v8.5  |  xray-core  |  Multi-Preset  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ── Colors ────────────────────────────────────────────────────────
@@ -42,8 +42,8 @@ NEXT_FP="" NEXT_PORT=0 RT_TARGET="" RT_SNS="" SESSION_KEY=""
 # ── Config Persistence ────────────────────────────────────────────
 save_conf() {
     mkdir -p "$(dirname "$GOLDIP_CONF")"
-    printf 'PANEL_DOMAIN=%q\nPANEL_PORT=%q\nPANEL_PATH=%q\nSSL_OK=%s\nCERT_FILE=%q\nKEY_FILE=%q\n' \
-        "$PANEL_DOMAIN" "$PANEL_PORT" "$PANEL_PATH" "$SSL_OK" "$CERT_FILE" "$KEY_FILE" > "$GOLDIP_CONF"
+    printf 'PANEL_DOMAIN=%q\nPANEL_PORT=%q\nPANEL_PATH=%q\nSSL_OK=%s\nCERT_FILE=%q\nKEY_FILE=%q\nPANEL_USER=%q\nPANEL_PASS=%q\n' \
+        "$PANEL_DOMAIN" "$PANEL_PORT" "$PANEL_PATH" "$SSL_OK" "$CERT_FILE" "$KEY_FILE" "$PANEL_USER" "$PANEL_PASS" > "$GOLDIP_CONF"
 }
 
 load_conf() {
@@ -350,6 +350,27 @@ ENDJSON
     do_insert "SS_XHTTP" "shadowsocks" "$NEXT_PORT" "$S" "$ST"
 }
 
+# ── Domain Validation ────────────────────────────────────────────
+ensure_domain() {
+    [ -n "$PANEL_DOMAIN" ] && return 0
+    print_warn "Domain not configured — required for host field in inbound configs!"
+    echo -e "${BG_DTEAL}  Panel Domain (will be stored and used in all inbound configs):  ${NC}"
+    echo -n -e "${C4}  domain > ${NC}"; read -r PANEL_DOMAIN
+    if [ -z "$PANEL_DOMAIN" ]; then
+        print_error "Domain is required! Inbounds need a valid host value."
+        return 1
+    fi
+    # Auto-detect SSL cert for this domain if available
+    local EC="/etc/letsencrypt/live/${PANEL_DOMAIN}/fullchain.pem"
+    local EK="/etc/letsencrypt/live/${PANEL_DOMAIN}/privkey.pem"
+    if [ -f "$EC" ] && [ -f "$EK" ]; then
+        CERT_FILE="$EC"; KEY_FILE="$EK"; SSL_OK=true
+        CERT_ENTRY="\"certificates\":[{\"certificateFile\":\"${CERT_FILE}\",\"keyFile\":\"${KEY_FILE}\"}],"
+        print_success "SSL cert found for ${PANEL_DOMAIN}."
+    fi
+    save_conf
+}
+
 # ── Presets ────────────────────────────────────────────────────────
 run_preset_3()  {
     reset_counters; PATH_IDX=0
@@ -502,7 +523,7 @@ list_inbounds() {
 show_header() {
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP  3X-UI Manager  v8.4  |  xray-core              ║"
+    echo "  ║  GoldIP  3X-UI Manager  v8.5  |  xray-core              ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     local ST_COLOR ST_TEXT
@@ -513,67 +534,103 @@ show_header() {
     [ "$SSL_OK" = true ] \
         && echo -e "  ${C6}● SSL:${NC}  ${BG_GREEN}  VALID  ${NC}" \
         || echo -e "  ${C6}● SSL:${NC}  ${BG_RED}  NONE   ${NC}"
-    # [Change 2] Show only PUBLIC_KEY — PRIVATE_KEY is never printed
-    [ "$REALITY_OK" = true ] && echo -e "  ${C6}● Reality PubKey:${NC} ${C4}${PUBLIC_KEY:0:24}...${NC}"
+    # Panel login URL (Reality key removed — not useful on screen)
+    local PROTO="http"; [ "$SSL_OK" = true ] && PROTO="https"
+    if [ -n "$PANEL_DOMAIN" ] && [ -n "$PANEL_PORT" ]; then
+        echo -e "  ${C6}● Panel:${NC} ${C4}${PROTO}://${PANEL_DOMAIN}:${PANEL_PORT}${PANEL_PATH}${NC}"
+    fi
+    [ -n "$PANEL_USER" ] && echo -e "  ${C6}● Login:${NC} ${C7}${PANEL_USER}${NC}  /  ${C5}${PANEL_PASS}${NC}"
     echo ""
 }
 
 after_inbounds() {
     echo ""; restart_xui
     echo -e "${C1}  Created: ${CREATED}${NC}   ${C3}Skipped: ${SKIPPED}${NC}"
-    [ "$SKIPPED" -gt 0 ] && [ "$SSL_OK" = false ] && \
-        print_warn "TLS inbounds skipped — use 'Get SSL' in Settings."
+    [ "$SKIPPED" -gt 0 ] && print_warn "Some inbounds skipped — TLS off or no SSL cert."
+    echo ""
+    local PROTO="http"; [ "$SSL_OK" = true ] && PROTO="https"
+    [ -n "$PANEL_DOMAIN" ] && echo -e "${BG_NAVY}  URL:  ${PROTO}://${PANEL_DOMAIN}:${PANEL_PORT}${PANEL_PATH}  ${NC}"
+    [ -n "$PANEL_USER"   ] && echo -e "${BG_NAVY}  User: ${PANEL_USER}    Pass: ${PANEL_PASS}  ${NC}"
     echo ""; echo -e "${C7}  Press Enter...${NC}"; read -r
 }
 
-# ── [Change 5] Individual Inbound Menu ────────────────────────────
+# ── Individual Inbound Menu ───────────────────────────────────────
+_run_inbound_by_num() {
+    local N="$1"
+    case $N in
+        1)  create_vless_reality_tcp ;;
+        2)  create_vless_reality_xhttp ;;
+        3)  create_vless_xhttp ;;
+        4)  create_vless_ws_plain ;;
+        5)  create_vless_ws_tls ;;
+        6)  create_vless_grpc_tls ;;
+        7)  create_vless_hu_tls ;;
+        8)  create_trojan_ws_plain ;;
+        9)  create_trojan_ws_tls ;;
+        10) create_trojan_xhttp ;;
+        11) create_ss_tcp "aes-256-gcm" ;;
+        12) create_ss_tcp "chacha20-poly1305" ;;
+        13) create_ss_xhttp ;;
+        *)  print_warn "Invalid: ${N}" ;;
+    esac
+}
+
 menu_individual_inbound() {
+    ensure_domain || return
+    # TLS asked ONCE at the start, before the list is shown
+    clear; show_header; print_line "  ══ INDIVIDUAL INBOUND ══"; echo ""
+    ask_tls_pref
+
     while true; do
-        clear; show_header
-        print_line "  ══ INDIVIDUAL INBOUND ══"
+        local TLS_LBL; [ "$FORCE_NO_TLS" = true ] && TLS_LBL="OFF (plain fallback)" || TLS_LBL="ON"
+        clear; show_header; print_line "  ══ INDIVIDUAL INBOUND ══"; echo ""
+        echo -e "${BG_NAVY}  ── VLESS ──────────────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}   1   VLESS-Reality-TCP       xtls-rprx-vision, no TLS        ${NC}"
+        echo -e "${BG_NAVY}   2   VLESS-Reality-XHTTP     Reality+XHTTP, no TLS           ${NC}"
+        echo -e "${BG_NAVY}   3   VLESS-XHTTP             plain, host+padding+xmux        ${NC}"
+        echo -e "${BG_NAVY}   4   VLESS-WS                plain WS + heartbeat            ${NC}"
+        echo -e "${BG_NAVY}   5   VLESS-WS-TLS            WS+TLS+fingerprint+ALPN         ${NC}"
+        echo -e "${BG_NAVY}   6   VLESS-gRPC-TLS          gRPC+TLS+authority+heartbeat    ${NC}"
+        echo -e "${BG_NAVY}   7   VLESS-HU-TLS            HttpUpgrade+TLS+ALPN            ${NC}"
+        echo -e "${BG_NAVY}  ── TROJAN ──────────────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}   8   Trojan-WS               plain WS + heartbeat            ${NC}"
+        echo -e "${BG_NAVY}   9   Trojan-WS-TLS           WS+TLS+fingerprint+ALPN         ${NC}"
+        echo -e "${BG_NAVY}  10   Trojan-XHTTP            plain, host+padding+xmux        ${NC}"
+        echo -e "${BG_NAVY}  ── SHADOWSOCKS ─────────────────────────────────────────────  ${NC}"
+        echo -e "${BG_NAVY}  11   SS-TCP-AES256-GCM       raw TCP                         ${NC}"
+        echo -e "${BG_NAVY}  12   SS-TCP-ChaCha20         raw TCP                         ${NC}"
+        echo -e "${BG_NAVY}  13   SS-XHTTP                XHTTP+host+padding+xmux         ${NC}"
+        echo -e "${BG_NAVY}   T   Toggle TLS  [current: ${TLS_LBL}]                        ${NC}"
+        echo -e "${BG_NAVY}   0   Back                                                     ${NC}"
         echo ""
-        [ "$SSL_OK"     != true ] && echo -e "  ${BG_YELLOW}  ⚠  No SSL — TLS inbounds will be skipped  ${NC}"
-        [ "$REALITY_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No Reality keys — Reality inbounds skipped  ${NC}"
-        echo ""
-        # [Change 1+6] BG_NAVY boxes with full-line color for each item
-        echo -e "${BG_NAVY}  ── VLESS ────────────────────────────────────────────────  ${NC}"
-        echo -e "${BG_NAVY}   1   VLESS-Reality-TCP       xtls-rprx-vision, no TLS      ${NC}"
-        echo -e "${BG_NAVY}   2   VLESS-Reality-XHTTP     Reality security, XHTTP        ${NC}"
-        echo -e "${BG_NAVY}   3   VLESS-XHTTP             plain, host+padding obfs       ${NC}"
-        echo -e "${BG_NAVY}   4   VLESS-WS                plain WebSocket                ${NC}"
-        echo -e "${BG_NAVY}   5   VLESS-WS-TLS            WebSocket over TLS  [SSL req]  ${NC}"
-        echo -e "${BG_NAVY}   6   VLESS-gRPC-TLS          gRPC + heartbeat    [SSL req]  ${NC}"
-        echo -e "${BG_NAVY}   7   VLESS-HttpUpgrade-TLS   HU over TLS         [SSL req]  ${NC}"
-        echo -e "${BG_NAVY}  ── TROJAN ────────────────────────────────────────────────  ${NC}"
-        echo -e "${BG_NAVY}   8   Trojan-WS               plain WebSocket                ${NC}"
-        echo -e "${BG_NAVY}   9   Trojan-WS-TLS           WebSocket over TLS  [SSL req]  ${NC}"
-        echo -e "${BG_NAVY}  10   Trojan-XHTTP            plain, padding obfs            ${NC}"
-        echo -e "${BG_NAVY}  ── SHADOWSOCKS ───────────────────────────────────────────  ${NC}"
-        echo -e "${BG_NAVY}  11   SS-TCP-AES256-GCM       raw TCP                        ${NC}"
-        echo -e "${BG_NAVY}  12   SS-TCP-ChaCha20         raw TCP                        ${NC}"
-        echo -e "${BG_NAVY}  13   SS-XHTTP                XHTTP + host + padding         ${NC}"
-        echo -e "${BG_NAVY}   0   Back                                                    ${NC}"
-        echo ""
-        echo -n -e "${C3}  choice > ${NC}"; read -r CH
-        [ "$CH" = "0" ] && return
-        clear; show_header; ask_tls_pref; reset_counters
-        case $CH in
-            1)  create_vless_reality_tcp ;;
-            2)  create_vless_reality_xhttp ;;
-            3)  create_vless_xhttp ;;
-            4)  create_vless_ws_plain ;;
-            5)  create_vless_ws_tls ;;
-            6)  create_vless_grpc_tls ;;
-            7)  create_vless_hu_tls ;;
-            8)  create_trojan_ws_plain ;;
-            9)  create_trojan_ws_tls ;;
-            10) create_trojan_xhttp ;;
-            11) create_ss_tcp "aes-256-gcm" ;;
-            12) create_ss_tcp "chacha20-poly1305" ;;
-            13) create_ss_xhttp ;;
-            *)  print_warn "Invalid choice."; sleep 1; continue ;;
+        echo -e "${C3}  Enter number or comma-separated (e.g. 1,3,5):${NC}"
+        echo -n -e "${C3}  > ${NC}"; read -r CH_INPUT
+
+        case "${CH_INPUT^^}" in
+            0) return ;;
+            T) ask_tls_pref; continue ;;
+            *)
+                reset_counters
+                local VALID=false
+                IFS=',' read -ra CHOICES <<< "$CH_INPUT"
+                for RAW in "${CHOICES[@]}"; do
+                    local N; N=$(echo "$RAW" | tr -d ' ')
+                    [[ -z "$N" ]] && continue
+                    if [[ ! "$N" =~ ^[0-9]+$ ]]; then
+                        print_warn "Invalid input: '${N}' — skipped"
+                        continue
+                    fi
+                    VALID=true
+                    _run_inbound_by_num "$N"
+                done
+                if [ "$VALID" = false ]; then
+                    print_warn "No valid selection — enter a number or comma list like 1,3,5"
+                    sleep 2
+                else
+                    after_inbounds
+                fi
+                ;;
         esac
-        after_inbounds
     done
 }
 
@@ -596,6 +653,7 @@ menu_inbounds() {
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case "${CH^^}" in
             1|2|3|4|5)
+                ensure_domain || continue
                 clear; show_header
                 case "${CH^^}" in
                     1) echo -e "${C1}  ▶  3-Config: WS-TLS + gRPC-TLS + Reality-TCP${NC}" ;;
