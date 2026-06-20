@@ -657,7 +657,7 @@ do_install() {
     clear
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v8.3                        ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v8.3                                   ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
