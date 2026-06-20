@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v8.2  |  xray-core  |  Multi-Preset  ║
+# ║  GoldIP 3X-UI Manager  v8.3  |  xray-core  |  Multi-Preset  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ── Colors ────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ PRIVATE_KEY="" PUBLIC_KEY="" REALITY_OK=false   # [Change 2] PRIVATE_KEY never p
 FORCE_NO_TLS=false                               # [Change 4] TLS on/off flag
 CREATED=0 SKIPPED=0 PATH_IDX=0
 NEXT_RPATH="" NEXT_XHTTP_HDR="" NEXT_WS_HDR="" NEXT_HU_HDR=""
-NEXT_FP="" NEXT_PORT=0 RT_TARGET="" RT_SNS=""
+NEXT_FP="" NEXT_PORT=0 RT_TARGET="" RT_SNS="" SESSION_KEY=""
 
 # ── Config Persistence ────────────────────────────────────────────
 save_conf() {
@@ -138,6 +138,7 @@ advance() {
     local RI=$((RANDOM % ${#REALITY_TARGETS[@]}))
     RT_TARGET="${REALITY_TARGETS[$RI]}"; RT_SNS="${REALITY_SNS[$RI]}"
     NEXT_PORT=$((RANDOM % 45000 + 10000))
+    SESSION_KEY=$(LC_ALL=C tr -dc "a-zA-Z0-9" </dev/urandom 2>/dev/null | head -c 32 || openssl rand -hex 16 | head -c 32)
     ((PATH_IDX++))
 }
 
@@ -163,7 +164,7 @@ mkuuid() { cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 16;
 reset_counters() { CREATED=0; SKIPPED=0; }
 
 mk_vless()  { local U="$1" F="$2" E="$3"; cat <<J
-{"clients":[{"id":"${U}","flow":"${F}","email":"${E}","limitIp":0,"totalGB":0,"expiryTime":0,"enable":true,"tgId":"","subId":"","comment":"","reset":0}],"decryption":"none","fallbacks":[]}
+{"clients":[{"id":"${U}","flow":"${F}","email":"${E}","enable":true,"expiryTime":0,"limitIp":0,"totalGB":0,"reset":0,"subId":"","tgId":0,"comment":""}],"decryption":"none","encryption":"none"}
 J
 }
 mk_trojan() { local P="$1" E="$2"; cat <<J
@@ -200,7 +201,7 @@ create_vless_reality_xhttp() {
     UUID=$(mkuuid); SID1=$(openssl rand -hex 4); SID2=$(openssl rand -hex 4); SID3=$(openssl rand -hex 8)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"reality","xhttpSettings":{"path":"${NEXT_RPATH}","host":"","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}}}
+{"network":"xhttp","security":"reality","xhttpSettings":{"path":"${NEXT_RPATH}","host":"","mode":"auto","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"xPaddingHeader":"X-Padding","xPaddingPlacement":"header","sessionPlacement":"cookie","sessionKey":"${SESSION_KEY}","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","uplinkHTTPMethod":"POST","headers":${NEXT_XHTTP_HDR},"xmux":{"maxConnections":"8","cMaxReuseTimes":"256","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000","hKeepAlivePeriod":15}},"realitySettings":{"show":false,"xver":0,"target":"${RT_TARGET}","serverNames":${RT_SNS},"privateKey":"${PRIVATE_KEY}","minClientVer":"","maxClientVer":"","maxTimediff":60,"shortIds":["${SID1}","${SID2}","${SID3}"],"settings":{"publicKey":"${PUBLIC_KEY}","fingerprint":"${NEXT_FP}","serverName":"","spiderX":"/"}}}
 ENDJSON
 )
     do_insert "VLESS_Reality_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -212,7 +213,7 @@ create_vless_xhttp() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"xPaddingHeader":"X-Padding","xPaddingPlacement":"header","sessionPlacement":"cookie","sessionKey":"${SESSION_KEY}","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","uplinkHTTPMethod":"POST","headers":${NEXT_XHTTP_HDR},"xmux":{"maxConnections":"8","cMaxReuseTimes":"256","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000","hKeepAlivePeriod":15}}}
 ENDJSON
 )
     do_insert "VLESS_XHTTP" "vless" "$NEXT_PORT" "$S" "$ST"
@@ -306,7 +307,7 @@ create_trojan_xhttp() {
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"xPaddingHeader":"X-Padding","xPaddingPlacement":"header","sessionPlacement":"cookie","sessionKey":"${SESSION_KEY}","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","uplinkHTTPMethod":"POST","headers":${NEXT_XHTTP_HDR},"xmux":{"maxConnections":"8","cMaxReuseTimes":"256","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000","hKeepAlivePeriod":15}}}
 ENDJSON
 )
     do_insert "Trojan_XHTTP" "trojan" "$NEXT_PORT" "$S" "$ST"
@@ -331,7 +332,7 @@ create_ss_xhttp() {
     PASS=$(openssl rand -base64 24 | tr -d '=+/\n' | head -c 24)
     S=$(mk_ss "aes-256-gcm" "$PASS" "ss_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"noSSEHeader":false,"scMinPostsIntervalMs":"10","headers":${NEXT_XHTTP_HDR}}}
+{"network":"xhttp","security":"none","xhttpSettings":{"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","mode":"auto","xPaddingBytes":"100-1000","xPaddingObfsMode":true,"xPaddingHeader":"X-Padding","xPaddingPlacement":"header","sessionPlacement":"cookie","sessionKey":"${SESSION_KEY}","scMaxEachPostBytes":"1000000","scMaxBufferedPosts":30,"scStreamUpServerSecs":"20-80","uplinkHTTPMethod":"POST","headers":${NEXT_XHTTP_HDR},"xmux":{"maxConnections":"8","cMaxReuseTimes":"256","hMaxRequestTimes":"600-900","hMaxReusableSecs":"1800-3000","hKeepAlivePeriod":15}}}
 ENDJSON
 )
     do_insert "SS_XHTTP" "shadowsocks" "$NEXT_PORT" "$S" "$ST"
@@ -489,7 +490,7 @@ list_inbounds() {
 show_header() {
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP  3X-UI Manager  v8.2  |  xray-core              ║"
+    echo "  ║  GoldIP  3X-UI Manager  v8.3  |  xray-core              ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     local ST_COLOR ST_TEXT
@@ -656,7 +657,7 @@ do_install() {
     clear
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v8.2                        ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v8.3                        ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
