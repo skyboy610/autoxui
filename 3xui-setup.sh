@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v8.3    |   xray-core   |     Multi-Preset       ║
+# ║  GoldIP 3X-UI Manager  v8.4  |  xray-core  |  Multi-Preset  ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ── Colors ────────────────────────────────────────────────────────
@@ -225,29 +225,29 @@ create_vless_ws_plain() {
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30}}
 ENDJSON
 )
     do_insert "VLESS_WS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
 create_vless_ws_tls() {
-    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-WS-TLS"; return; }
+    if [ "$FORCE_NO_TLS" = true ]; then create_vless_ws_plain; return; fi
     [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-WS-TLS"; return; }
     advance
     local UUID S ST
     UUID=$(mkuuid)
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
+{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30}}
 ENDJSON
 )
     do_insert "VLESS_WS_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
 create_vless_grpc_tls() {
-    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-gRPC-TLS"; return; }
-    [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-gRPC-TLS"; return; }
+    [ "$FORCE_NO_TLS" = true ] && { print_warn "TLS off → gRPC→XHTTP fallback"; create_vless_xhttp; return; }
+    [ "$SSL_OK" = false ]      && { print_warn "No SSL → gRPC→XHTTP fallback"; create_vless_xhttp; return; }
     advance
     local UUID SVC GRPC_UA S ST
     UUID=$(mkuuid)
@@ -255,14 +255,26 @@ create_vless_grpc_tls() {
 
     S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"grpc","security":"tls","grpcSettings":{"serviceName":"${SVC}","multiMode":false},"tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["h2"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false}}
+{"network":"grpc","security":"tls","grpcSettings":{"authority":"${PANEL_DOMAIN}","serviceName":"${SVC}","multiMode":false,"idle_timeout":60,"health_check_timeout":20,"permit_without_stream":true,"initial_windows_size":65536},"tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["h2"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false}}
 ENDJSON
 )
     do_insert "VLESS_gRPC_TLS" "vless" "$NEXT_PORT" "$S" "$ST"
 }
 
+create_vless_hu_plain() {
+    advance
+    local UUID S ST
+    UUID=$(mkuuid)
+    S=$(mk_vless "$UUID" "" "vless_${NEXT_PORT}")
+    ST=$(cat <<ENDJSON
+{"network":"httpupgrade","security":"none","httpupgradeSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_HU_HDR}}}
+ENDJSON
+)
+    do_insert "VLESS_HU" "vless" "$NEXT_PORT" "$S" "$ST"
+}
+
 create_vless_hu_tls() {
-    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "VLESS-HU-TLS"; return; }
+    if [ "$FORCE_NO_TLS" = true ]; then create_vless_hu_plain; return; fi
     [ "$SSL_OK" = false ]      && { _skip_ssl "VLESS-HU-TLS"; return; }
     advance
     local UUID S ST
@@ -281,21 +293,21 @@ create_trojan_ws_plain() {
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
+{"network":"ws","security":"none","wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30}}
 ENDJSON
 )
     do_insert "Trojan_WS" "trojan" "$NEXT_PORT" "$S" "$ST"
 }
 
 create_trojan_ws_tls() {
-    [ "$FORCE_NO_TLS" = true ] && { _skip_tls "Trojan-WS-TLS"; return; }
+    if [ "$FORCE_NO_TLS" = true ]; then create_trojan_ws_plain; return; fi
     [ "$SSL_OK" = false ]      && { _skip_ssl "Trojan-WS-TLS"; return; }
     advance
     local PASS S ST
     PASS=$(openssl rand -hex 16)
     S=$(mk_trojan "$PASS" "trojan_${NEXT_PORT}")
     ST=$(cat <<ENDJSON
-{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR}}}
+{"network":"ws","security":"tls","tlsSettings":{"serverName":"${PANEL_DOMAIN}","allowInsecure":false,"fingerprint":"${NEXT_FP}","alpn":["http/1.1"],"minVersion":"1.2","maxVersion":"1.3","cipherSuites":"",${CERT_ENTRY}"rejectUnknownSni":false},"wsSettings":{"acceptProxyProtocol":false,"path":"${NEXT_RPATH}","host":"${PANEL_DOMAIN}","headers":${NEXT_WS_HDR},"heartbeatPeriod":30}}
 ENDJSON
 )
     do_insert "Trojan_WS_TLS" "trojan" "$NEXT_PORT" "$S" "$ST"
@@ -490,7 +502,7 @@ list_inbounds() {
 show_header() {
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP  3X-UI Manager  v8.3  |  xray-core              ║"
+    echo "  ║  GoldIP  3X-UI Manager  v8.4  |  xray-core              ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     local ST_COLOR ST_TEXT
@@ -570,10 +582,7 @@ menu_inbounds() {
     while true; do
         clear; show_header
         print_line "  ══ INBOUND MANAGER ══"
-        [ "$SSL_OK"     != true ] && echo -e "  ${BG_YELLOW}  ⚠  No SSL — TLS inbounds skipped  ${NC}"
-        [ "$REALITY_OK" != true ] && echo -e "  ${BG_YELLOW}  ⚠  No Reality keys — Reality skipped  ${NC}"
         echo ""
-        # [Change 6] Full-line color using mitem helper
         mitem "$C1" "1" "3-Config    │ WS-TLS + gRPC-TLS + Reality-TCP"
         mitem "$C2" "2" "5-Config    │ WS-TLS + gRPC-TLS + XHTTP + Trojan-WS + SS-TCP"
         mitem "$C3" "3" "6-Config LB │ XHTTP×3 (multi-browser) + WS + gRPC + Trojan"
@@ -586,11 +595,21 @@ menu_inbounds() {
         echo ""
         echo -n -e "${C3}  choice > ${NC}"; read -r CH
         case "${CH^^}" in
-            1) clear; show_header; ask_tls_pref; run_preset_3;    after_inbounds ;;
-            2) clear; show_header; ask_tls_pref; run_preset_5;    after_inbounds ;;
-            3) clear; show_header; ask_tls_pref; run_preset_6_lb; after_inbounds ;;
-            4) clear; show_header; ask_tls_pref; run_preset_7;    after_inbounds ;;
-            5) clear; show_header; ask_tls_pref; run_preset_10;   after_inbounds ;;
+            1|2|3|4|5)
+                clear; show_header
+                case "${CH^^}" in
+                    1) echo -e "${C1}  ▶  3-Config: WS-TLS + gRPC-TLS + Reality-TCP${NC}" ;;
+                    2) echo -e "${C2}  ▶  5-Config: WS-TLS + gRPC-TLS + XHTTP + Trojan-WS + SS${NC}" ;;
+                    3) echo -e "${C3}  ▶  6-Config LB: XHTTP×3 + WS + gRPC + Trojan${NC}" ;;
+                    4) echo -e "${C4}  ▶  7-Config: Reality + XHTTP×3 + gRPC + Trojan-WS + SS${NC}" ;;
+                    5) echo -e "${C5}  ▶  10-Config: Full Coverage${NC}" ;;
+                esac
+                echo ""; ask_tls_pref; reset_counters
+                case "${CH^^}" in
+                    1) run_preset_3 ;; 2) run_preset_5 ;;
+                    3) run_preset_6_lb ;; 4) run_preset_7 ;; 5) run_preset_10 ;;
+                esac
+                after_inbounds ;;
             6) menu_individual_inbound ;;
             L) clear; list_inbounds; echo -e "${C7}  Press Enter...${NC}"; read -r ;;
             D) clean_inbounds; echo -e "${C7}  Press Enter...${NC}"; read -r ;;
@@ -657,7 +676,7 @@ do_install() {
     clear
     echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v8.3                                   ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v8.4                        ║"
     echo "  ╚══════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 
@@ -728,23 +747,22 @@ do_install() {
     save_conf; find_and_gen_keys
 
     echo ""; print_line "  ══ SELECT INBOUND PRESET ══"; echo ""
-    # [Change 6] Full-line color for preset list
-    mitem "$C1" "1" "3-Config    │ WS-TLS + gRPC-TLS + Reality-TCP"
+    mitem "$C1" "1" "3-Config    │ WS + gRPC + Reality-TCP"
     mitem "$C2" "2" "5-Config    │ Full Stack (WS+gRPC+XHTTP+Trojan+SS)"
     mitem "$C3" "3" "6-Config LB │ Load Balance: XHTTP×3 + WS + gRPC + Trojan"
     mitem "$C4" "4" "7-Config    │ Reality-TCP + XHTTP×3 + gRPC + Trojan-WS + SS"
     mitem "$C5" "5" "10-Config   │ Full Coverage (all types)"
     mitem "$C9" "0" "Skip (add inbounds later from menu)"
     echo ""
-    # [Change 4] Ask TLS before preset
-    ask_tls_pref
-    echo ""
     PRESET=""
     while [[ ! "$PRESET" =~ ^[0-5]$ ]]; do
         echo -e "${BG_DMAGENTA}  Select preset (0-5):  ${NC}"
         echo -n -e "${C3}  preset > ${NC}"; read -r PRESET
     done
-
+    echo ""
+    # Ask TLS AFTER preset selection
+    [ "$PRESET" != "0" ] && ask_tls_pref
+    echo ""
     case $PRESET in
         1) run_preset_3 ;; 2) run_preset_5 ;;
         3) run_preset_6_lb ;; 4) run_preset_7 ;;
