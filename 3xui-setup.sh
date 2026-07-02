@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║  GoldIP 3X-UI Manager  v9.8  |  xray-core  |  Fixed Build   ║
+# ║  GoldIP 3X-UI Manager  v9.9  |  xray-core  |  Fixed Install   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # ── Colors ────────────────────────────────────────────────────────
@@ -407,7 +407,7 @@ run_preset_6_custom() { create_vless_ws_plain; create_vless_xhttp; create_vless_
 run_preset_7()        { create_vless_reality_tcp; create_hysteria_tls; create_vless_xhttp; create_vless_grpc_tls; create_trojan_ws_tls; create_ss_tcp "chacha20-poly1305"; create_wireguard; }
 run_preset_10()       { create_vless_reality_tcp; create_vless_reality_xhttp; create_vless_xhttp; create_vless_ws_tls; create_vless_grpc_tls; create_vless_hu_tls; create_trojan_ws_tls; create_ss_tcp "chacha20-poly1305"; create_hysteria_tls; create_wireguard; }
 
-# ── SSL: Core logic from 3xui-setup.sh (working, direct, no prompts) ──
+# ── SSL: Core logic (working, direct, no prompts) ──
 # Called internally with PANEL_DOMAIN already set.
 get_ssl() {
     [ -z "$PANEL_DOMAIN" ] && { print_error "No domain set."; return 1; }
@@ -512,7 +512,7 @@ set_ssl_manual() {
 do_install() {
     clear; echo -e "${C1}"
     echo "  ╔══════════════════════════════════════════════════════════╗"
-    echo "  ║  GoldIP 3X-UI Auto Install  v9.8                        ║"
+    echo "  ║  GoldIP 3X-UI Auto Install  v9.9                        ║"
     echo "  ╚══════════════════════════════════════════════════════════╝${NC}"
 
     PANEL_DOMAIN=""
@@ -557,13 +557,31 @@ do_install() {
         export DEBIAN_FRONTEND=noninteractive
         export XUI_NONINTERACTIVE=1
 
-        # Download installer to file so yes can feed all prompts reliably
+        # Download installer to file
         curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh \
             -o /tmp/xui_install.sh 2>/dev/null
         chmod +x /tmp/xui_install.sh
 
-        # yes feeds every prompt; stdin closed after; all output captured
-        yes 2>/dev/null | bash /tmp/xui_install.sh </dev/null >/tmp/xui_install.log 2>&1 &
+        # ── THE FIX ──────────────────────────────────────────────
+        # Root cause of the previous hang/error: the old code did
+        #   yes | bash install.sh </dev/null
+        # The explicit "</dev/null" on the bash command OVERRIDES the
+        # pipe from "yes" (redirects on the command itself win over a
+        # pipe feeding it), so the installer's stdin was actually EOF
+        # from the first prompt onward — it printed a few lines then
+        # died on the first "read". Even if the pipe HAD worked, "yes"
+        # blindly answers every prompt with the literal string "y",
+        # which also gets fed into prompts that expect a real value
+        # (like the port number), corrupting the install (see
+        # MHSanaei/3x-ui#3896).
+        #
+        # The official installer supports a proper unattended mode:
+        # XUI_NONINTERACTIVE=1 makes it install end-to-end with ZERO
+        # prompts, using random temporary credentials — which is fine
+        # here because we overwrite user/pass/port/path right after
+        # install anyway via `x-ui setting ...` below. No stdin piping
+        # needed at all.
+        bash /tmp/xui_install.sh >/tmp/xui_install.log 2>&1 &
         local INSTALL_PID=$!
 
         echo -n -e "${C4}  Progress: [${NC}"
@@ -609,7 +627,7 @@ do_install() {
 
     save_conf
 
-    # ── SSL: uses get_ssl() from 3xui-setup.sh — works with PANEL_DOMAIN already set ──
+    # ── SSL: uses get_ssl() — works with PANEL_DOMAIN already set ──
     get_ssl
 
     gen_x25519
@@ -858,7 +876,7 @@ menu_service() {
 
 show_header() {
     echo -e "${C1}  ╔══════════════════════════════════════════════════════════╗"
-    echo -e "  ║  GoldIP  3X-UI Manager  v9.8  |  xray-core               ║"
+    echo -e "  ║  GoldIP  3X-UI Manager  v9.9  |  xray-core               ║"
     echo -e "  ╚══════════════════════════════════════════════════════════╝${NC}"
     local ST_COLOR="${BG_RED}" ST_TEXT=" STOPPED "
     systemctl is-active --quiet x-ui 2>/dev/null && ST_COLOR="${BG_GREEN}" ST_TEXT=" RUNNING "
